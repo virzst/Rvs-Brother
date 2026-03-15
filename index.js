@@ -957,7 +957,6 @@ return res.json({
   listBug: bugs,
   news
 });
-});
 
 app.get("/myInfo", (req, res) => {
   const { username, password, androidId, key } = req.query;
