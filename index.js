@@ -97,6 +97,10 @@ function watchKeyList() {
 // Initialize watcher
 watchKeyList();
 
+
+const cors = require('cors');
+app.use(cors()); // Izinkan akses dari domain mana saja
+
 // Load chat from file
 if (fs.existsSync(CHAT_FILE)) {
   try {
